@@ -1,0 +1,221 @@
+SETPRIVILEGE("SeDebugPrivilege", 1)
+Global Const $WS_EX_TOPMOST = 8
+Global Const $GUI_EVENT_CLOSE = -3
+Global $UPDATE = False
+Global $PROCESS, $WOWPROCESS
+Global $PLAYERBASE
+Global $OBJBASE
+$WLIST = ProcessList("Wow.exe")
+If $WLIST[0][0] > 1 Then
+MsgBox(4096, "Warning!", "Found more then one process 'WoW.exe'!")
+ElseIf $WLIST[0][0] < 1 Then
+MsgBox(4096, "Error", "Unable to find WoW Process!")
+Exit
+EndIf
+$PROCESS = $WLIST[1][1]
+$WOWPROCESS = _MEMORYOPEN($PROCESS)
+If $WOWPROCESS = 0 Then
+MsgBox(4096, "Error", "Unable open wow memory!")
+Exit
+EndIf
+GUICreate("Ебаш Без ГКД", 300, 120, -1, -1, -1, $WS_EX_TOPMOST)
+$LBL_X = GUICtrlCreateLabel("----", 25, 5, 160, 15)
+GUISetState()
+While 1
+$MSG = GUIGetMsg()
+Switch $MSG
+Case $GUI_EVENT_CLOSE
+_MEMORYCLOSE($PROCESS)
+Exit
+EndSwitch
+UPDATE()
+WEnd
+
+Func CHKCD($SPELL, $SPELLCD)
+$BASECD = 14023248
+$CD = $BASECD
+$NEXTCD = _MEMORYREAD($CD + 8, $WOWPROCESS, "ptr")
+While ($NEXTCD <> 0) And (Mod($NEXTCD, 2) = 0)
+$CD = $NEXTCD
+$NEXTCD = _MEMORYREAD($CD + 4, $WOWPROCESS, "ptr")
+$ECD = _MEMORYREAD($CD + 4, $WOWPROCESS, "int")
+$ID = _MEMORYREAD($CD + 8, $WOWPROCESS, "int")
+If $ID = $SPELL Then
+$STARTTIME = _MEMORYREAD($CD + 16, $WOWPROCESS, "int")
+Local $PF = DllStructCreate("ulong")
+DllCall("kernel32.dll", "none", "QueryPerformanceFrequency", "ptr", DllStructGetPtr($PF))
+Local $PC = DllStructCreate("int64")
+DllCall("kernel32.dll", "none", "QueryPerformanceCounter", "ptr", DllStructGetPtr($PC))
+$TS = (DllStructGetData($PC, 1) / DllStructGetData($PF, 1)) * 1000
+If ($TS - $STARTTIME < $SPELLCD) Then
+Return 1
+EndIf
+EndIf
+WEnd
+Return 0
+EndFunc
+
+
+Func CDS($SPELL, $SPELLCD)
+$BASECD = 11495944
+$CD = $BASECD
+$NR = 0
+$NEXTCD = _MEMORYREAD($CD + 8, $WOWPROCESS, "ptr")
+GUICtrlSetData($LBL_X, $NEXTCD)
+While ($NEXTCD <> 0) And (BitAND($NEXTCD, 1) = 0)
+$NR = $NR + 1
+$CD = $NEXTCD
+$NEXTCD = _MEMORYREAD($CD + 4, $WOWPROCESS, "ptr")
+$ECD = _MEMORYREAD($CD + 4, $WOWPROCESS, "int")
+$ID = _MEMORYREAD($CD + 8, $WOWPROCESS, "int")
+$STARTTIME = _MEMORYREAD($CD + 16, $WOWPROCESS, "uint")
+Local $PF = DllStructCreate("ulong")
+DllCall("kernel32.dll", "none", "QueryPerformanceFrequency", "ptr", DllStructGetPtr($PF))
+Local $PC = DllStructCreate("int64")
+DllCall("kernel32.dll", "none", "QueryPerformanceCounter", "ptr", DllStructGetPtr($PC))
+$TS = (DllStructGetData($PC, 1) / DllStructGetData($PF, 1)) * 1000
+$MYCD = _MEMORYREAD($CD + 16, $WOWPROCESS, "int")
+If ($TS - $STARTTIME < $SPELLCD) Then
+_MEMORYWRITE($CD + 16, $WOWPROCESS, "uint", $STARTTIME - 1500)
+Return 1
+EndIf
+WEnd
+Return 0
+EndFunc
+
+
+Func UPDATE()
+CDS(0, 300)
+EndFunc
+
+#region - Memory
+
+Func _MEMORYOPEN($IV_PID, $IV_DESIREDACCESS = -1, $IV_INHERITHANDLE = 1)
+If Not ProcessExists($IV_PID) Then
+SetError(1)
+Return 0
+EndIf
+Local $AH_HANDLE[2] = [DllOpen("kernel32.dll")]
+If @error Then
+SetError(2)
+Return 0
+EndIf
+Local $AV_OPENPROCESS = DllCall($AH_HANDLE[0], "int", "OpenProcess", "int", $IV_DESIREDACCESS, "int", $IV_INHERITHANDLE, "int", $IV_PID)
+If @error Then
+DllClose($AH_HANDLE[0])
+SetError(3)
+Return 0
+EndIf
+$AH_HANDLE[1] = $AV_OPENPROCESS[0]
+Return $AH_HANDLE
+EndFunc
+
+
+Func _MEMORYWRITE($IV_ADDRESS, $AH_HANDLE, $SV_TYPE, $SUBJ)
+If Not IsArray($AH_HANDLE) Then
+SetError(1)
+Return 0
+EndIf
+Local $V_BUFFER = DllStructCreate($SV_TYPE)
+If @error Then
+SetError(@error + 1)
+Return 0
+EndIf
+DllStructSetData($V_BUFFER, 1, $SUBJ)
+DllCall($AH_HANDLE[0], "int", "WriteProcessMemory", "int", $AH_HANDLE[1], "int", $IV_ADDRESS, "ptr", DllStructGetPtr($V_BUFFER), "int", DllStructGetSize($V_BUFFER), "int", "")
+If Not @error Then
+Return -1
+Else
+SetError(6)
+Return 0
+EndIf
+EndFunc
+
+
+Func _MEMORYREAD($IV_ADDRESS, $AH_HANDLE, $SV_TYPE = "dword")
+If Not IsArray($AH_HANDLE) Then
+SetError(1)
+Return 0
+EndIf
+Local $V_BUFFER = DllStructCreate($SV_TYPE)
+If @error Then
+SetError(@error + 1)
+Return 0
+EndIf
+DllCall($AH_HANDLE[0], "int", "ReadProcessMemory", "int", $AH_HANDLE[1], "int", $IV_ADDRESS, "ptr", DllStructGetPtr($V_BUFFER), "int", DllStructGetSize($V_BUFFER), "int", "")
+If Not @error Then
+Local $V_VALUE = DllStructGetData($V_BUFFER, 1)
+Return $V_VALUE
+Else
+SetError(6)
+Return 0
+EndIf
+EndFunc
+
+
+Func _MEMORYCLOSE($AH_HANDLE)
+If Not IsArray($AH_HANDLE) Then
+SetError(1)
+Return 0
+EndIf
+DllCall($AH_HANDLE[0], "int", "CloseHandle", "int", $AH_HANDLE[1])
+If Not @error Then
+DllClose($AH_HANDLE[0])
+Return 1
+Else
+DllClose($AH_HANDLE[0])
+SetError(2)
+Return 0
+EndIf
+EndFunc
+
+
+Func SETPRIVILEGE($PRIVILEGE, $BENABLE)
+Const $MY_TOKEN_ADJUST_PRIVILEGES = 32
+Const $MY_TOKEN_QUERY = 8
+Const $MY_SE_PRIVILEGE_ENABLED = 2
+Local $HTOKEN, $SP_AUXRET, $SP_RET, $HCURRPROCESS, $NTOKENS, $NTOKENINDEX, $PRIV
+$NTOKENS = 1
+$LUID = DllStructCreate("dword;int")
+If IsArray($PRIVILEGE) Then $NTOKENS = UBound($PRIVILEGE)
+$TOKEN_PRIVILEGES = DllStructCreate("dword;dword[" & (3 * $NTOKENS) & "]")
+$NEWTOKEN_PRIVILEGES = DllStructCreate("dword;dword[" & (3 * $NTOKENS) & "]")
+$HCURRPROCESS = DllCall("kernel32.dll", "hwnd", "GetCurrentProcess")
+$SP_AUXRET = DllCall("advapi32.dll", "int", "OpenProcessToken", "hwnd", $HCURRPROCESS[0], "int", BitOR($MY_TOKEN_ADJUST_PRIVILEGES, $MY_TOKEN_QUERY), "int*", 0)
+If $SP_AUXRET[0] Then
+$HTOKEN = $SP_AUXRET[3]
+DllStructSetData($TOKEN_PRIVILEGES, 1, 1)
+$NTOKENINDEX = 1
+While $NTOKENINDEX <= $NTOKENS
+If IsArray($PRIVILEGE) Then
+$PRIV = $PRIVILEGE[$NTOKENINDEX - 1]
+Else
+$PRIV = $PRIVILEGE
+EndIf
+$RET = DllCall("advapi32.dll", "int", "LookupPrivilegeValue", "str", "", "str", $PRIV, "ptr", DllStructGetPtr($LUID))
+If $RET[0] Then
+If $BENABLE Then
+DllStructSetData($TOKEN_PRIVILEGES, 2, $MY_SE_PRIVILEGE_ENABLED, (3 * $NTOKENINDEX))
+Else
+DllStructSetData($TOKEN_PRIVILEGES, 2, 0, (3 * $NTOKENINDEX))
+EndIf
+DllStructSetData($TOKEN_PRIVILEGES, 2, DllStructGetData($LUID, 1), (3 * ($NTOKENINDEX - 1)) + 1)
+DllStructSetData($TOKEN_PRIVILEGES, 2, DllStructGetData($LUID, 2), (3 * ($NTOKENINDEX - 1)) + 2)
+DllStructSetData($LUID, 1, 0)
+DllStructSetData($LUID, 2, 0)
+EndIf
+$NTOKENINDEX += 1
+WEnd
+$RET = DllCall("advapi32.dll", "int", "AdjustTokenPrivileges", "hwnd", $HTOKEN, "int", 0, "ptr", DllStructGetPtr($TOKEN_PRIVILEGES), "int", DllStructGetSize($NEWTOKEN_PRIVILEGES), "ptr", DllStructGetPtr($NEWTOKEN_PRIVILEGES), "int*", 0)
+$F = DllCall("kernel32.dll", "int", "GetLastError")
+EndIf
+$NEWTOKEN_PRIVILEGES = 0
+$TOKEN_PRIVILEGES = 0
+$LUID = 0
+If $SP_AUXRET[0] = 0 Then Return 0
+$SP_AUXRET = DllCall("kernel32.dll", "int", "CloseHandle", "hwnd", $HTOKEN)
+If Not $RET[0] And Not $SP_AUXRET[0] Then Return 0
+Return $RET[0]
+EndFunc
+
+#endregion - Memory
